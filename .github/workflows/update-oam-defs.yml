@@ -42,7 +42,7 @@ jobs:
       run: |
         sudo curl -O https://s3.amazonaws.com/traefikee/binaries/v{{traefikee_version}}/traefikee_v{{traefikee_version}}_linux_amd64.tar.gz
         sudo curl -O https://s3.amazonaws.com/traefikee/binaries/v{{traefikee_version}}/teectl_v{{traefikee_version}}_linux_amd64.tar.gz 
-        awk teectl setup gen --controllers=3 --proxies=3 --license="your-traefikee-license" > traefikee-manifest.yaml | kubectl apply -f traefikee-manifest.yaml | kubectl -n traefikee get pods | teectl get nodes
+        awk teectl setup gen --controllers=3 --proxies=3 --license="your-traefikee-license" > traefikee-manifest.yaml > kubectl apply -f traefikee-manifest.yaml > kubectl -n traefikee get pods > teectl get nodes
 
     - name: Bulild jsonschema util
       run: |
