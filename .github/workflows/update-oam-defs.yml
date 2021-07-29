@@ -1,0 +1,88 @@
+name: Meshery Traefik Mesh Components Generator
+on:
+  push:
+    branches:
+      - "master"
+jobs:
+  check_traefik_version:
+    name: Check Traefik Version
+    runs-on: ubuntu-latest
+    outputs:
+      NEW_TRAEFIK_VERSION: ${{ steps.glrt.outputs.release }}
+      CURRENT_TRAEFIK_VERSION: ${{ env.CURRENT_TRAEFIK_VERSION }}
+    steps:
+      - name: Get latest release tag
+        id: glrt
+        uses: pozetroninc/github-action-get-latest-release@master
+        with:
+          repository: traefik/traefik
+          excludes: prerelease, draft
+      - name: Check out code
+        uses: actions/checkout@master
+        with:
+          fetch-depth: 1
+      - name: Get CURRENT_TRAEFIK_VERSION from .env
+        run: |
+          cat .github/.env > $GITHUB_ENV
+  generator:
+    name: Generate and push OAM definitions
+    needs: [check_traefik_version]
+    if: ${{ needs.check_traefik_version.outputs.NEW_TRAEFIK_VERSION  >  needs.check_traefik_version.outputs.CURRENT_TRAEFIK_VERSION }}
+    env:
+      NEW_TRAEFIK_VERSION: ${{ needs.check_traefik_version.outputs.NEW_TRAEFIK_VERSION }}
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out code
+      uses: actions/checkout@master
+      with:
+        fetch-depth: 1
+        token: ${{ secrets.GH_ACCESS_TOKEN }}
+        ref: "master"
+    - name: Get Traefik Manifests
+        curl -O https://s3.amazonaws.com/traefikee/binaries/v{{traefikee_version}}/traefikee_v{{traefikee_version}}_linux_amd64.tar.gz
+             -O https://s3.amazonaws.com/traefikee/binaries/v{{traefikee_version}}/teectl_v{{traefikee_version}}_linux_amd64.tar.gz 
+        awk teectl setup gen --controllers=3 --proxies=3 --license="your-traefikee-license" > traefikee-manifest.yaml
+
+    - name: Bulild jsonschema util
+      run: |
+          curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
+          export NVM_DIR="$HOME/.nvm"
+          [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+          nvm install v14.15.3
+          nvm install-latest-npm
+          git clone https://github.com/layer5io/kubeopenapi-jsonschema util
+          cd util
+          npm i; npm i nexe -g
+          make linux
+    - name: Generate Workload definitions
+      run: |
+          mkdir -p ./templates/oam/workloads-$NEW_TRAEFIK_VERSION
+          cd util
+          template='{"apiVersion":"core.oam.dev/v1alpha1","kind":"WorkloadDefinition","metadata":{"name":""},"spec":{"definitionRef":{"name":""}}}'
+          crds=$(./kubeopenapi-jsonschema --location ~/traefik.yaml -t yaml --filter '$[?(@.kind=="CustomResourceDefinition")]' -o json --o-filter '$..["spec"]["names"]["kind"]' | jq '.[]')
+          for t in ${crds[@]}; do
+            nameUpper=`echo $t  | tr -d '"'`
+            nameLower=`echo $t  | tr -d '"' | tr '[:upper:]' '[:lower:]'`
+            definitionRef=$(printf %straefik.meshery.layer5.io $nameLower)
+            name=`echo $t | tr -d '"' | tr '[:upper:]' '[:lower:]'`
+            definitionRef=$(printf %straefik.meshery.layer5.io $name)
+            ./kubeopenapi-jsonschema --location ~/traefik.yaml -t yaml --filter '$[?(@.kind=="CustomResourceDefinition" && @.spec.names.kind=='$t')]..openAPIV3Schema.properties.spec' --o-filter "$[]" -o json | jq '.[] | .version = "'$NEW_TRAEFIK_VERSION'" | .title = "'$(printf %sTRAEFIK $nameUpper)'"' > ../templates/oam/workloads-$NEW_TRAEFIK_VERSION/$(printf %straefik.meshery.layer5io.schema.json $nameLower)
+            echo $template | jq ' ."metadata"."name" = "'$(printf %sTRAEFIK $nameUpper)'" | ."spec"."definitionRef"."name"="'$definitionRef'"' > ../templates/oam/workloads-$NEW_TRAEFIK_VERSION/$(printf %sTRAEFIK_definition.json $nameLower)
+          done
+    - name: Cleanup
+      run: |
+          rm -rf util traefik-*
+    - name: Update TRAEFIK version in .env
+      run: |
+          echo "CURRENT_TRAEFIK_VERSION=$NEW_TRAEFIK_VERSION" > .github/.env
+    - name: Commit changes
+      uses: stefanzweifel/git-auto-commit-action@v4
+      with:
+          file_pattern: ./templates ./.github
+          commit_user_name: l5io
+          commit_user_email: ci@layer5.io
+          commit_author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
+          commit_options: "--signoff"
+          commit_message: "[Patterns] Pattern components generated from latest traefik manifests"
+          branch: master
+
