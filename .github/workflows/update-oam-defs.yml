@@ -40,8 +40,9 @@ jobs:
         ref: "master"
     - name: Get Traefik Manifests
       run: |
-        wget -c  https://s3.amazonaws.com/traefikee/binaries/v{{traefikee_version}}/traefikee_v{{traefikee_version}}_linux_amd64.tar.gz -O - | sudo tar -xz
-        wget -c  https://s3.amazonaws.com/traefikee/binaries/v{{traefikee_version}}/teectl_v{{traefikee_version}}_linux_amd64.tar.gz -O - | sudo tar -xz
+        wget -c https://s3.amazonaws.com/traefikee/binaries/v2.4.11/teectl_v2.4.11_linux_armv7.tar.gz
+        tar -zxvf teectl_v2.4.11_linux_amd64.tar.gz
+        cp ./teectl /usr/local/bin/teectl
         teectl setup --kubernetes
         teectl setup gen --controllers=3 --proxies=3 --license="your-traefikee-license" > traefikee-manifest.yaml 
         kubectl apply -f traefikee-manifest.yaml 
